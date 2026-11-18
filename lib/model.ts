@@ -63,8 +63,75 @@ export const MODEL: ModelConstants = {
   unknown_age_days: 365,
 };
 
+/**
+ * A protocol's category, mapped to how likely it is to farm a token soon. This is the radar's edge:
+ * two protocols with the same TVL and growth do not imply the same value, because some categories
+ * (bridges, restaking, L2s, DEXs, lending) drop tokens far more often than others (CEX, wrappers,
+ * oracles). The map is by category word, not by name, so the same rule scores every row. Every
+ * category not listed scores 1 — the neutral case.
+ */
+const CATEGORY_FACTOR: Record<string, number> = {
+  'bridge': 1.30,
+  'canonical bridge': 1.30,
+  'cross chain bridge': 1.30,
+  'liquid restaking': 1.35,
+  'restaking': 1.35,
+  'restaked btc': 1.30,
+  'decentralized btc': 1.25,
+  'chain': 1.25,
+  'dexs': 1.20,
+  'dex': 1.20,
+  'lending': 1.20,
+  'cdp': 1.20,
+  'cdp manager': 1.20,
+  'liquid staking': 1.15,
+  'staking pool': 1.15,
+  'yield': 1.10,
+  'yield aggregator': 1.08,
+  'basis trading': 1.05,
+  'derivatives': 1.05,
+  'prediction market': 1.20,
+  'launchpad': 1.30,
+  'governance incentives': 1.10,
+  'token locker': 1.05,
+  'indexes': 1.05,
+  'ai agents': 1.15,
+  'decentralized ai': 1.15,
+  'curator': 1.05,
+  'risk curators': 1.05,
+  'onchain capital allocator': 1.05,
+  'cex': 0.80,
+  'stablecoin wrapper': 0.90,
+  'dual-token stablecoin': 0.90,
+  'algo-stables': 0.95,
+  'stablecoin issuer': 0.90,
+  'privacy': 1.00,
+  'payments': 0.95,
+  'insurance': 0.95,
+  'options': 1.00,
+  'options vault': 1.00,
+};
+
+/** The airdrop factor of a protocol's category, or 1 when unknown/no category. */
+export function airdropFactor(category: string | null): number {
+  if (category === null) return 1;
+  const c = category.toLowerCase();
+  if (CATEGORY_FACTOR[c] !== undefined) return CATEGORY_FACTOR[c];
+  // Fall back on the strongest word that appears in a composite category name.
+  const words = ['bridge', 'restak', 'staking', 'dex', 'lend', 'yield', 'cdp', 'vault', 'curator', 'launchpad', 'index', 'ai'];
+  for (const w of words) {
+    if (c.includes(w)) {
+      for (const key of Object.keys(CATEGORY_FACTOR)) {
+        if (key.includes(w) && CATEGORY_FACTOR[key] !== undefined) return CATEGORY_FACTOR[key] as number;
+      }
+    }
+  }
+  return 1;
+}
+
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-1';
+export const MODEL_VERSION = 'radar-2-airdrop';
+
 
 /** How many pre-token protocols below the watchlist floor the early radar carries, by TVL. */
 export const EARLY_ROWS = 160;
@@ -100,6 +167,7 @@ export interface BoardRow {
     growth_pct: number;
     growth_multiplier: number;
     maturity_multiplier: number;
+    airdrop_multiplier: number;
     age_days: number | null;
   };
   farm_steps: string[];
@@ -120,6 +188,7 @@ export interface RadarRow {
   implied_value_usd: number;
   growth_multiplier: number;
   maturity_multiplier: number;
+  airdrop_multiplier: number;
 }
 
 /** A live-token protocol: it already trades, so the board shows the market's own value, not a model's. */
@@ -173,16 +242,17 @@ export function ageDays(asOf: string, listedAt: string | null): number | null {
 }
 
 /** The three multipliers and the implied value one protocol gets under `model`. */
-export function impliedValue(protocol: SnapshotProtocol, asOf: string, model: ModelConstants): { implied: number; growthPct: number; growthMult: number; maturityMult: number; age: number | null } {
+export function impliedValue(protocol: SnapshotProtocol, asOf: string, model: ModelConstants): { implied: number; growthPct: number; growthMult: number; maturityMult: number; airdropMult: number; age: number | null } {
   const age = ageDays(asOf, protocol.listed_at);
   const rawGrowth = finite(protocol.change_7d, 0);
   const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, rawGrowth));
   const growthMult = 1 + (growthPct / 100) * model.growth_weight;
   const ageForModel = age ?? model.unknown_age_days;
   const maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
+  const airdropMult = airdropFactor(protocol.category);
   const base = protocol.tvl_usd * model.base_multiple;
-  const implied = Math.max(1, Math.round(base * growthMult * maturityMult));
-  return { implied, growthPct, growthMult, maturityMult, age };
+  const implied = Math.max(1, Math.round(base * growthMult * maturityMult * airdropMult));
+  return { implied, growthPct, growthMult, maturityMult, airdropMult, age };
 }
 
 /** DefiLlama's version-marker rule: a name ending in a release is a pool of another protocol. */
@@ -230,8 +300,8 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
   for (const p of early) chosen.set(p.slug, p);
 
   const scored = [...chosen.values()].map((p) => {
-    const { implied, growthPct, growthMult, maturityMult, age } = impliedValue(p, snapshot.as_of, model);
-    return { p, implied, growthPct, growthMult, maturityMult, age };
+    const { implied, growthPct, growthMult, maturityMult, airdropMult, age } = impliedValue(p, snapshot.as_of, model);
+    return { p, implied, growthPct, growthMult, maturityMult, airdropMult, age };
   });
   scored.sort((a, b) => b.implied - a.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
   return scored.map((s, i) => ({
@@ -254,6 +324,7 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
       growth_pct: s.growthPct,
       growth_multiplier: round4(s.growthMult),
       maturity_multiplier: round4(s.maturityMult),
+      airdrop_multiplier: round4(s.airdropMult),
       age_days: s.age,
     },
     farm_steps: farmSteps(s.p, s.age).map(stepText),
@@ -384,6 +455,7 @@ export function radarRow(row: BoardRow): RadarRow {
     implied_value_usd: row.implied_value_usd,
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
+    airdrop_multiplier: row.model.airdrop_multiplier,
   };
 }
 
