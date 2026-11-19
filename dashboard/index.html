@@ -3,151 +3,173 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar — pre-token protocols ranked by implied value</title>
-<meta name="description" content="A launch radar for protocols that record no token: ranked by an implied value built from TVL, seven-day growth and age, with a farm plan for each one.">
+<title>Token Radar - pre-token launch desk</title>
+<meta name="description" content="A pre-token launch desk: 200 protocols that record no token, ranked by an implied value computed from TVL, seven-day growth and age, each with a farm plan.">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<a class="skip" href="#console">Skip to the board</a>
-<div class="grid-fx" aria-hidden="true"></div>
+<a class="skip" href="#board">Skip to the board</a>
 
-<main class="shell" id="board" tabindex="-1" aria-busy="true">
+<main class="shell" id="board">
 
   <header class="top">
     <div class="brand">
-      <span class="mark" aria-hidden="true"><i></i></span>
-      <span class="brand-text">
+      <span class="mark" aria-hidden="true"></span>
+      <div class="brand-text">
         <span class="brand-name">Token Radar</span>
-        <span class="brand-sub">pre-token launch desk</span>
-      </span>
+        <span class="brand-sub">Pre-token launch desk</span>
+      </div>
     </div>
-    <dl class="telemetry">
-      <div><dt>Snapshot</dt><dd id="t-asof">—</dd></div>
-      <div><dt>Floor</dt><dd id="t-floor">—</dd></div>
-      <div><dt>Model</dt><dd id="t-model">—</dd></div>
-      <div><dt>Status</dt><dd class="lamp"><span class="lamp-dot" aria-hidden="true"></span>local data</dd></div>
+    <dl class="telemetry" aria-label="Snapshot telemetry">
+      <div class="chip"><dt>Snapshot</dt><dd id="t-asof">&mdash;</dd></div>
+      <div class="chip"><dt>Floor</dt><dd id="t-floor">&mdash;</dd></div>
+      <div class="chip"><dt>Model</dt><dd id="t-model">&mdash;</dd></div>
+      <div class="chip chip-status"><dt>Status</dt><dd><span class="dot" aria-hidden="true"></span>local data</dd></div>
     </dl>
   </header>
 
-  <section class="hero">
-    <div class="hero-copy">
-      <p class="kicker"><span id="t-scanned">—</span> protocols in the sealed snapshot</p>
-      <h1><span class="count" id="t-watch">—</span> protocols record no token. This is what one might be worth.</h1>
-      <p class="lede">Every protocol at or above the watchlist floor that records no token is ranked by an implied value built from its own figures: TVL, seven-day growth and the time it has been tracked. The early radar adds the pre-token protocols below the floor; protocols whose token already trades are set aside with their market caps shown. The estimate is the entry's claim, not a promise, and not a price.</p>
+  <section class="coverage" aria-label="Snapshot coverage">
+    <ul class="coverage-list" id="coverage">
+      <li class="cov cov-ok"><span class="cov-check" aria-hidden="true">&#10003;</span> Watchlist <b id="cov-watch">&mdash;</b> covered</li>
+      <li class="cov"><b id="cov-ranked">&mdash;</b> ranked</li>
+      <li class="cov"><b id="cov-early">&mdash;</b> below floor</li>
+      <li class="cov"><b id="cov-live">&mdash;</b> live-token set aside</li>
+    </ul>
+  </section>
+
+  <section class="kpis" aria-label="Board key figures">
+    <div class="kpi">
+      <span class="kpi-label">Median implied value</span>
+      <span class="kpi-value" id="kpi-median">&mdash;</span>
+      <span class="kpi-note" id="kpi-median-note">&mdash;</span>
     </div>
-    <div class="hero-stats" id="t-stats">
-      <div class="stat">
-        <span class="stat-label">Watchlist</span>
-        <span class="stat-value" id="t-covered">—</span>
-        <span class="stat-note">every slug covered</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Board rows</span>
-        <span class="stat-value" id="t-rows">—</span>
-        <span class="stat-note">ranked by value</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Early radar</span>
-        <span class="stat-value" id="t-early">—</span>
-        <span class="stat-note">below the floor</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Set aside</span>
-        <span class="stat-value" id="t-live">—</span>
-        <span class="stat-note">token trades</span>
-      </div>
+    <div class="kpi">
+      <span class="kpi-label">Total TVL ranked</span>
+      <span class="kpi-value" id="kpi-tvl">&mdash;</span>
+      <span class="kpi-note" id="kpi-tvl-note">&mdash;</span>
+    </div>
+    <div class="kpi">
+      <span class="kpi-label">Top category by implied value</span>
+      <span class="kpi-value kpi-value-sm" id="kpi-cat">&mdash;</span>
+      <span class="kpi-note" id="kpi-cat-note">&mdash;</span>
     </div>
   </section>
 
-  <section class="console" id="console">
-    <form class="filters" role="search" id="filters" autocomplete="off" action="#console">
+  <section class="console" aria-label="Board controls">
+    <form class="filters" id="filters" autocomplete="off" action="#board">
       <div class="field field-search">
         <label class="field-label" for="q">Search</label>
-        <div class="input-wrap">
-          <input id="q" name="q" type="search" placeholder="name, category or chain" enterkeyhint="search">
-          <button class="clear-q" id="clear-q" type="button" aria-label="Clear the search" title="Clear search" hidden>&times;</button>
-        </div>
+        <input id="q" type="search" placeholder="name, category or chain" aria-label="Search protocols by name, category or chain">
       </div>
       <div class="field">
         <label class="field-label" for="category">Category</label>
-        <select id="category" name="category"><option value="">All categories</option></select>
+        <select id="category" aria-label="Filter by category">
+          <option value="">All categories</option>
+        </select>
       </div>
       <div class="field">
         <span class="field-label" id="tab-label">Token status</span>
         <div class="tabs" role="group" aria-labelledby="tab-label">
-          <button type="button" id="tab-pre" aria-pressed="true">Pre-token</button>
-          <button type="button" id="tab-live" aria-pressed="false">Trades now</button>
+          <button type="button" id="tab-pre" class="tab is-active" aria-pressed="true">Pre-token</button>
+          <button type="button" id="tab-live" class="tab" aria-pressed="false">Trades now</button>
         </div>
       </div>
-      <p class="result-count" id="count" role="status" aria-live="polite"></p>
-    </form>
-
-    <div class="banner" id="banner" hidden>
-      <span class="banner-tag">Filtered</span>
-      <p id="banner-text"></p>
-      <button type="button" class="ghost" id="banner-clear">Clear filters</button>
-    </div>
-
-    <div class="panel">
-      <table id="board-table">
-        <caption id="board-caption">Pre-token protocols, strongest implied value first. Pick a column to sort it; open a row for its equation and farm plan.</caption>
-        <thead id="board-head"></thead>
-        <tbody id="board-body"></tbody>
-      </table>
-      <div class="empty" id="empty" hidden>
-        <p class="empty-kicker">No contact</p>
-        <h2 id="empty-title">Nothing matches that filter</h2>
-        <p class="empty-copy" id="empty-copy">The radar is still scanning the whole snapshot — the table is only narrowed.</p>
-        <button class="button primary" id="empty-clear" type="button">Clear filters</button>
+      <div class="field field-reset">
+        <span class="field-label" aria-hidden="true">&nbsp;</span>
+        <button type="button" class="ghost" id="reset">Reset</button>
       </div>
-    </div>
+    </form>
+    <p class="count" id="count" role="status" aria-live="polite"></p>
+  </section>
 
-    <div class="panel" id="live-panel" hidden>
-      <table id="live-table">
-        <caption>Token live: these protocols already trade, so their market cap is a market fact, not this model's estimate. They are never ranked against the pre-token board.</caption>
-        <thead>
-          <tr>
-            <th scope="col">Protocol</th>
-            <th scope="col">Category</th>
-            <th scope="col" class="num">TVL</th>
-            <th scope="col" class="num">7d</th>
-            <th scope="col" class="num">Market cap</th>
-            <th scope="col">Token</th>
-          </tr>
-        </thead>
-        <tbody id="live-body"></tbody>
-      </table>
+  <section class="panel" id="board-panel" aria-label="Pre-token board">
+    <table id="board-table">
+      <caption>Pre-token protocols, strongest implied value first. Click a column to sort it; open a row for its model breakdown and farm plan.</caption>
+      <thead>
+        <tr>
+          <th scope="col" class="num sortable" data-key="rank" aria-sort="descending">Rank</th>
+          <th scope="col" class="sortable" data-key="name">Protocol</th>
+          <th scope="col" class="num sortable" data-key="tvl">TVL</th>
+          <th scope="col" class="num sortable" data-key="change">7D</th>
+          <th scope="col" class="num sortable" data-key="age">Age</th>
+          <th scope="col" class="num sortable is-sorted" data-key="implied" aria-sort="descending">Implied value</th>
+          <th scope="col">Token</th>
+        </tr>
+      </thead>
+      <tbody id="board-body"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden>
+      <h2>Nothing matches that filter</h2>
+      <p>The board is only narrowed, never replaced &mdash; clear the filters to see every row.</p>
+      <button type="button" class="ghost" id="empty-reset">Clear filters</button>
     </div>
+    <div class="empty" id="no-data" hidden>
+      <h2>No snapshot loaded</h2>
+      <p>The page renders from a local data file that sets window.RADAR. It is empty or missing, so there is nothing honest to show.</p>
+    </div>
+  </section>
 
-    <p class="hint" id="hint">Every row is a link: press <kbd>Enter</kbd> on a protocol, or pick a column to sort. Search matches name, slug, category and chain.</p>
+  <section class="panel" id="live-panel" aria-label="Protocols whose token already trades" hidden>
+    <p class="live-note">Token already trades: the market sets its value, not this model. These rows are never ranked against the pre-token board.</p>
+    <table id="live-table">
+      <caption>Live-token protocols, largest market cap first.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Protocol</th>
+          <th scope="col">Category</th>
+          <th scope="col" class="num">TVL</th>
+          <th scope="col" class="num">Market cap</th>
+          <th scope="col" class="num">7D</th>
+          <th scope="col">Token</th>
+        </tr>
+      </thead>
+      <tbody id="live-body"></tbody>
+    </table>
+  </section>
+
+  <section class="model-panel">
+    <details id="how">
+      <summary>How implied value is computed</summary>
+      <div class="how-body">
+        <p class="formula" id="formula">implied = max(1, round(TVL &times; 0.25 &times; (1 + clamp(7d, &minus;60, 120)/100 &times; 0.5) &times; (0.6 + min(age, 1095)/1095 &times; 0.4) &times; category))</p>
+        <p class="how-copy">One function scores every row from its own snapshot figures &mdash; TVL, seven-day growth and its age without a token. No protocol name is special-cased, and the three multipliers below are shown on every row so the estimate can be checked against the data.</p>
+        <ul class="mult-list">
+          <li><span class="mult-chip">&times;growth</span> Seven-day TVL change, clamped to &minus;60..120%, weighted at 0.5 &mdash; momentum moves the estimate, but it cannot double it.</li>
+          <li><span class="mult-chip">&times;maturity</span> Age without a token: 0.60 at launch, 1.00 after three years &mdash; the longer a protocol runs tokenless, the more of its value is still unissued.</li>
+          <li><span class="mult-chip">&times;category</span> The category's airdrop coefficient: bridges, restaking and lending farm tokens more often than stablecoin issuers or CEX, so the same TVL implies a different value.</li>
+        </ul>
+        <p class="how-foot" id="how-foot"></p>
+      </div>
+    </details>
   </section>
 
   <footer class="foot">
-    <p><b>Implied value is the entry's own claim.</b> It is what a token might be worth if this protocol's record held still — not whether one is issued, and not when. The snapshot records no token for these protocols; that is a record, never a proof.</p>
-    <p class="foot-meta"><span id="t-source">DefiLlama protocol index</span> · floor <span id="t-floor2">—</span> · model <span id="t-model2">—</span> · one function scores every row, no name is special-cased.</p>
+    <p><b>Implied value is this desk's own claim.</b> It is what a protocol's record might be worth if a token were issued against it &mdash; not whether one is issued, and not when. Every figure comes from the sealed snapshot on this page; nothing is fetched.</p>
+    <p class="foot-meta"><span id="t-source">DefiLlama protocol index</span> &middot; <span id="t-floor2">&mdash;</span> floor &middot; <span id="t-model2">&mdash;</span></p>
   </footer>
 
-  <noscript><p class="noscript">This page renders from a local data file with JavaScript. Enable it, then reload — no network is used.</p></noscript>
+  <noscript><p class="noscript">This page renders from a local data file with JavaScript. Enable it and reload; no network is used.</p></noscript>
 </main>
 
-<dialog class="detail" id="detail" aria-labelledby="detail-title">
+<dialog class="detail" id="detail" aria-labelledby="detail-name">
   <div class="detail-inner">
     <div class="detail-bar">
-      <p class="detail-file" id="detail-file">Protocol file</p>
+      <span class="detail-file">Protocol file</span>
       <div class="detail-nav">
-        <button type="button" id="detail-prev" aria-label="Previous protocol in this sort">‹ Prev</button>
-        <button type="button" id="detail-next" aria-label="Next protocol in this sort">Next ›</button>
-        <button type="button" class="close" id="detail-close">Close <kbd>Esc</kbd></button>
+        <button type="button" class="ghost" id="detail-prev" aria-label="Previous protocol in this sort">&lsaquo; Prev</button>
+        <button type="button" class="ghost" id="detail-next" aria-label="Next protocol in this sort">Next &rsaquo;</button>
+        <button type="button" class="ghost" id="detail-close">Close <kbd>Esc</kbd></button>
       </div>
     </div>
     <header class="detail-head">
       <div class="detail-id">
-        <h2 id="detail-title">Protocol</h2>
+        <h2 id="detail-name">&mdash;</h2>
         <p class="detail-meta" id="detail-meta"></p>
       </div>
       <div class="detail-figure">
-        <span id="detail-figure-label">Implied value</span>
-        <strong id="detail-value">—</strong>
+        <span class="detail-figure-label">Implied value</span>
+        <strong id="detail-value">&mdash;</strong>
+        <span class="detail-figure-note" id="detail-ratio">&mdash;</span>
       </div>
     </header>
     <div class="detail-body" id="detail-body"></div>
