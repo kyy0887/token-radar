@@ -125,7 +125,7 @@ export const AIRDROP_COEFFICIENTS: Record<string, number> = {
  */
 const CATEGORY_FACTOR: Record<string, number> = AIRDROP_COEFFICIENTS;
 
-/** The airdrop factor of a protocol's category, or 1 when unknown/no category. */
+/** The airdrop factor of a protocol's category, or 1 when unknown or no category: the neutral case. */
 export function airdropFactor(category: string | null): number {
   if (category === null) return 1;
   const c = category.toLowerCase();
