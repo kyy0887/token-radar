@@ -9,7 +9,7 @@ A token launch radar for make.fun's `token-radar-01` bounty.
 It reads a sealed DefiLlama protocol snapshot, ranks every pre-token protocol by implied
 value, and builds a static dashboard that plots which protocol is worth farming next and
 how. The ranking is a pure function of the snapshot's own figures — no protocol name is
-special-cased — with an airdrop-category factor on top of TVL, seven-day growth and age.
+special-cased — with an airdrop-category model on top of TVL, seven-day growth and age.
 
 ## Run
 
@@ -20,6 +20,12 @@ mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input <snapshot.json>
 ```
 
 Writes `board.json`, `data.js`, `dashboard/`, `screenshots/` and `dossier.json` into `out/`.
+
+Use `--quiet` to suppress progress output:
+
+```sh
+mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input <snapshot.json> --quiet
+```
 
 ## Model
 

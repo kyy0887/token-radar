@@ -64,13 +64,12 @@ export const MODEL: ModelConstants = {
 };
 
 /**
- * A protocol's category, mapped to how likely it is to farm a token soon. This is the radar's edge:
- * two protocols with the same TVL and growth do not imply the same value, because some categories
- * (bridges, restaking, L2s, DEXs, lending) drop tokens far more often than others (CEX, wrappers,
- * oracles). The map is by category word, not by name, so the same rule scores every row. Every
- * category not listed scores 1 — the neutral case.
+ * Airdrop coefficients per category - these are the multipliers used by airdropFactor.
+ * Categories that historically farm tokens more often get higher coefficients.
+ * Bridges, restaking, L2 chains, DEXs, lending, and launchpads are prioritized.
+ * CEX and wrapper categories are deprioritized as they rarely drop tokens.
  */
-const CATEGORY_FACTOR: Record<string, number> = {
+export const AIRDROP_COEFFICIENTS: Record<string, number> = {
   'bridge': 1.30,
   'canonical bridge': 1.30,
   'cross chain bridge': 1.30,
@@ -111,6 +110,15 @@ const CATEGORY_FACTOR: Record<string, number> = {
   'options': 1.00,
   'options vault': 1.00,
 };
+
+/**
+ * A protocol's category, mapped to how likely it is to farm a token soon. This is the radar's edge:
+ * two protocols with the same TVL and growth do not imply the same value, because some categories
+ * (bridges, restaking, L2s, DEXs, lending) drop tokens far more often than others (CEX, wrappers,
+ * oracles). The map is by category word, not by name, so the same rule scores every row. Every
+ * category not listed scores 1 — the neutral case.
+ */
+const CATEGORY_FACTOR: Record<string, number> = AIRDROP_COEFFICIENTS;
 
 /** The airdrop factor of a protocol's category, or 1 when unknown/no category. */
 export function airdropFactor(category: string | null): number {
