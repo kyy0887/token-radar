@@ -63,7 +63,7 @@
     return round1(d / 365) + ' y';
   }
 
-  /** '×0.99' with two decimals trimmed, or an em dash. */
+  /** 'x0.99' with two decimals trimmed, or an em dash. */
   function mult(n) {
     if (typeof n !== 'number' || !isFinite(n)) return '\u2014';
     var s = (Math.round(n * 100) / 100).toFixed(2);
@@ -217,11 +217,12 @@
     set('kpi-cat-note', top ? usd(top.total) + ' implied value in total' : '');
 
     var howFoot = document.getElementById('how-foot');
-    if (howFoot) {
-      howFoot.textContent = 'Coefficients on this snapshot: base \u00d7' + radar.model.base_multiple +
-        ', growth weight \u00d7' + radar.model.growth_weight + ' over \u2212' + Math.abs(radar.model.growth_floor) +
-        '..' + radar.model.growth_cap + '%, maturity ' + radar.model.maturity_floor + ' to ' +
-        (radar.model.maturity_floor + radar.model.maturity_range) + ' over ' + radar.model.maturity_days + ' days.';
+    if (howFoot && radar.fit) {
+      var f = radar.fit;
+      howFoot.textContent = 'Fitted on this snapshot, not typed in: ' + f.n_live +
+        ' live-token peers. One global multiple of ' + f.global_multiple.toFixed(3) + 'x, then ' +
+        f.categories.filter(function (c) { return c.n > 0; }).length +
+        ' category multiples shrunk toward it with a prior of ' + f.prior_k + '.';
     }
 
     var src = document.getElementById('t-source');
@@ -305,9 +306,8 @@
     var barWidth = Math.max(2, Math.round((row.implied_value_usd / maxImplied) * 100));
     var bar = el('div', { class: 'impl-bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + barWidth + '%' }));
 
-    var growthChip = el('span', { class: 'mult-chip', title: 'growth multiplier: 1 + clamp(7d change) / 100 \u00d7 ' + (radar ? radar.model.growth_weight : 0.5) }, mult(row.growth_multiplier));
-    var maturityChip = el('span', { class: 'mult-chip', title: 'maturity multiplier: 0.6 + min(age, 1095) / 1095 \u00d7 0.4' }, mult(row.maturity_multiplier));
-    var catChip = el('span', { class: 'mult-chip', title: 'category multiplier: the airdrop coefficient for ' + (row.category || 'an uncategorized protocol') }, mult(row.airdrop_multiplier));
+    var multChip = el('span', { class: 'mult-chip', title: 'fitted multiple: ' + row.category_n + ' live-token peer(s) in this category, shifted along the TVL size slope' }, mult(row.multiple));
+    var bandChip = el('span', { class: 'mult-chip', title: '80 per cent leave-one-out band for this implied value' }, usd(row.low_value_usd) + '\u2013' + usd(row.high_value_usd));
 
     return el('tr', {
       class: 'rowlink',
@@ -328,7 +328,7 @@
       el('td', { class: 'impl-cell' },
         el('span', { class: 'impl-value', text: usd(row.implied_value_usd) }),
         bar,
-        el('div', { class: 'impl-mults' }, growthChip, maturityChip, catChip)),
+        el('div', { class: 'impl-mults' }, multChip, bandChip)),
       el('td', null, el('span', { class: 'badge', text: 'NO TOKEN' })));
   }
 
@@ -445,10 +445,14 @@
   /** The step-by-step arithmetic, each step with a bar sized against the implied value. */
   function detailModel(row) {
     var tvl = row.tvl_usd;
-    var base = tvl * (radar ? radar.model.base_multiple : 0.25);
-    var afterGrowth = base * (row.growth_multiplier || 1);
-    var afterMaturity = afterGrowth * (row.maturity_multiplier || 1);
-    var implied = Math.max(1, Math.round(afterMaturity * (row.airdrop_multiplier || 1)));
+    var f = radar && radar.fit ? radar.fit : null;
+    var key = row.category ? String(row.category).trim().toLowerCase() : 'uncategorised';
+    var logCat = f && f.log_by_category[key] !== undefined ? f.log_by_category[key] : (f ? f.log_global : 0);
+    var catMul = Math.pow(10, logCat);
+    var logTvl = Math.log(tvl) / Math.LN10;
+    var logSize = f ? f.intercept + f.size_slope * (logTvl - f.mean_log_tvl) : 0;
+    var sizeMul = Math.pow(10, logSize);
+    var implied = row.implied_value_usd;
 
     var scale = Math.max(implied, 1);
     function barRow(label, value, width, isAmber) {
@@ -461,15 +465,17 @@
     return el('div', { class: 'detail-section' },
       el('p', { class: 'detail-sec-label', text: 'How the implied value is built' }),
       el('div', { class: 'calc-rows' },
-        barRow('Base', usd(base), base, false),
-        barRow('\u00d7 growth', usd(afterGrowth), afterGrowth, false),
-        barRow('\u00d7 maturity', usd(afterMaturity), afterMaturity, false),
-        barRow('\u00d7 category', usd(implied), implied, true)),
+        barRow('TVL', usd(tvl), tvl, false),
+        barRow('\u00d7 category', usd(tvl * catMul), tvl * catMul, false),
+        barRow('\u00d7 size', usd(implied), implied, false),
+        barRow('band', usd(row.low_value_usd) + ' \u2013 ' + usd(row.high_value_usd), implied, true)),
       el('p', { class: 'calc-note' },
-        'TVL ' + usd(tvl) + ' \u00d7 0.25, then \u00d7' + mult(row.growth_multiplier) +
-        ' growth (7d ' + pct(row.change_7d) + '), \u00d7' + mult(row.maturity_multiplier) +
-        ' maturity (' + age(row.age_days) + ' without a token), \u00d7' + mult(row.airdrop_multiplier) +
-        ' category \u2192 ' + usd(row.implied_value_usd) + ' implied.'));
+        'TVL ' + usd(tvl) + ' \u00d7 ' + catMul.toFixed(3) + ' category (' + row.category_n +
+        ' peers) \u00d7 ' + sizeMul.toFixed(3) + ' size (log TVL ' + logTvl.toFixed(2) + ' against ' +
+        f.mean_log_tvl.toFixed(2) + ') \u2192 ' + usd(implied) + ' implied. 80% band ' +
+        usd(row.low_value_usd) + ' to ' + usd(row.high_value_usd) + '. Growth ' + pct(row.change_7d) +
+        ' and ' + age(row.age_days) + ' without a token are shown as context: the ablation refused both, ' +
+        'so neither moves this figure.'));
   }
 
   function detailPlan(row) {
@@ -602,9 +608,68 @@
     }
   }
 
+  /* ---------- fitted model panel ---------- */
+
+  /** Fill the calibration figures and the two tables straight from radar.fit: no number is typed here. */
+  function renderFit() {
+    if (!radar || !radar.fit) return;
+    var f = radar.fit;
+    var set = function (id, value) { var n = document.getElementById(id); if (n) n.textContent = value; };
+    function num(n, d) { return (typeof n === 'number' && isFinite(n)) ? n.toFixed(d) : '\u2014'; }
+    function pctOf(n) { return (typeof n === 'number' && isFinite(n)) ? Math.round(n * 100) + '%' : '\u2014'; }
+
+    set('f-k', String(f.prior_k));
+    set('f-z', num(f.band_z, 2));
+    set('f-slope', num(f.size_slope, 3));
+    set('f-t', num(f.size_t, 2));
+
+    var rows = f.ablation || [];
+    var byCat = rows.length > 2 ? rows[1] : null;
+    var byShip = rows.length > 2 ? rows[2] : null;
+    if (byCat) set('f-mae-cat', num(byCat.mae_dex, 3));
+    if (byShip) set('f-mae-ship', num(byShip.mae_dex, 3));
+
+    var body = document.getElementById('ablation-body');
+    if (body) {
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+        var shipped = r.priced ? 'yes' : (r.delta_dex > 0 ? 'no, it cost ' + num(r.delta_dex, 3) + ' dex' : 'no');
+        body.appendChild(el('tr', null,
+          el('td', { class: 'farm-step', text: r.name }),
+          el('td', { class: 'num', text: num(r.mae_dex, 3) }),
+          el('td', { class: 'num', text: i === 0 ? '\u2014' : (r.delta_dex > 0 ? '+' : '') + num(r.delta_dex, 3) }),
+          el('td', { text: shipped })));
+      }
+    }
+
+    var catBody = document.getElementById('cat-body');
+    var cats = (f.categories || []).slice().filter(function (c) { return c.n > 0; });
+    if (catBody) {
+      for (var j = 0; j < cats.length; j++) {
+        var c = cats[j];
+        catBody.appendChild(el('tr', null,
+          el('td', { class: 'farm-step', text: c.category }),
+          el('td', { class: 'num', text: String(c.n) }),
+          el('td', { class: 'num', text: num(c.geom_multiple, 3) + '\u00d7' }),
+          el('td', { class: 'num', text: num(c.shrunk_multiple, 3) + '\u00d7' }),
+          el('td', { class: 'num', text: num(c.low, 3) + ' \u2013 ' + num(c.high, 3) })));
+      }
+    }
+
+    var limit = document.getElementById('honest-limit');
+    if (limit) {
+      limit.textContent = 'What this fit cannot do: with ' + f.n_live + ' live-token peers it levels each category to a multiple, and it cannot pick which single protocol inside a category wins. ' +
+        'Leave-one-out, ' + pctOf(f.within2) + ' of peers land within 2x and ' + pctOf(f.within5) + ' within 5x, at a median actual/predicted of ' + num(f.p50_ratio, 2) + 'x ' +
+        '(the plain global multiple is ' + num(f.baseline_p50_ratio, 2) + 'x). ' +
+        'Seven-day momentum and age were tested and refused: each made out-of-sample error worse, so neither moves a row here. ' +
+        'Treat a row as a level with a band, not as a price.';
+    }
+  }
+
   /* ---------- boot ---------- */
 
   renderHeader();
+  renderFit();
   populateCategories();
   wireEvents();
   renderSortHeads();

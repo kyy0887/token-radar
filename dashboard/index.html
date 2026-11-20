@@ -131,14 +131,29 @@
     <details id="how">
       <summary>How implied value is computed</summary>
       <div class="how-body">
-        <p class="formula" id="formula">implied = max(1, round(TVL &times; 0.25 &times; (1 + clamp(7d, &minus;60, 120)/100 &times; 0.5) &times; (0.6 + min(age, 1095)/1095 &times; 0.4) &times; category))</p>
-        <p class="how-copy">One function scores every row from its own snapshot figures &mdash; TVL, seven-day growth and its age without a token. No protocol name is special-cased, and the three multipliers below are shown on every row so the estimate can be checked against the data.</p>
+        <p class="formula" id="formula">implied = round(TVL &times; multiple(category) &times; size(TVL))</p>
+        <p class="how-copy">Both factors are refitted on every run, from this snapshot&rsquo;s own live-token protocols: a token that already trades tells the desk what the market pays per dollar of TVL in its category and at its size. No coefficient is typed in by hand and no protocol name is special-cased. Growth and age are printed on each row as context &mdash; the ablation refused them, so they do not move the estimate.</p>
         <ul class="mult-list">
-          <li><span class="mult-chip">&times;growth</span> Seven-day TVL change, clamped to &minus;60..120%, weighted at 0.5 &mdash; momentum moves the estimate, but it cannot double it.</li>
-          <li><span class="mult-chip">&times;maturity</span> Age without a token: 0.60 at launch, 1.00 after three years &mdash; the longer a protocol runs tokenless, the more of its value is still unissued.</li>
-          <li><span class="mult-chip">&times;category</span> The category's airdrop coefficient: bridges, restaking and lending farm tokens more often than stablecoin issuers or CEX, so the same TVL implies a different value.</li>
+          <li><span class="mult-chip">&times;category</span> That category&rsquo;s geometric mean of mcap&nbsp;/&nbsp;TVL, shrunk toward the whole market by <b id="f-k">4</b> pseudo-observations. A category with one or two peers keeps most of the global level: one comparable is not evidence.</li>
+          <li><span class="mult-chip">&times;size</span> A fitted log&ndash;log slope on TVL of <b id="f-slope">&mdash;</b> per decade (t&nbsp;=&nbsp;<b id="f-t">&mdash;</b>): the bigger book pays the lower multiple, so TVL alone decides nothing. It takes the error from <b id="f-mae-cat">&mdash;</b> to <b id="f-mae-ship">&mdash;</b> dex.</li>
+          <li><span class="mult-chip">&plusmn;band</span> Each row carries an 80% band, <b id="f-z">&mdash;</b> &times; its own category&rsquo;s leave-one-out spread. The band is the honest unit; the point is a centre.</li>
         </ul>
         <p class="how-foot" id="how-foot"></p>
+        <p class="detail-sec-label">What the fit kept, and what it refused &mdash; leave-one-out over every live-token peer</p>
+        <table class="farm-table" id="ablation-table">
+          <thead>
+            <tr><th>Specification</th><th class="num">MAE, dex</th><th class="num">Change</th><th>Shipped</th></tr>
+          </thead>
+          <tbody id="ablation-body"></tbody>
+        </table>
+        <p class="detail-sec-label">The multiples it derived, by category</p>
+        <table class="farm-table" id="cat-table">
+          <thead>
+            <tr><th>Category</th><th class="num">Peers</th><th class="num">Raw mcap/TVL</th><th class="num">Fitted</th><th class="num">80% band</th></tr>
+          </thead>
+          <tbody id="cat-body"></tbody>
+        </table>
+        <p class="how-copy" id="honest-limit"></p>
       </div>
     </details>
   </section>

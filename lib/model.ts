@@ -1,21 +1,52 @@
-// The token radar's model: one snapshot of the protocol universe in, one ranked board out.
+// The token radar's model (v7): the snapshot's own live-token protocols are the comparables, and every other
+// protocol on the board is priced at the multiple those comparables already pay, for its category and its size.
 //
-// The board covers every slug in the snapshot's watchlist (the floor, never a ceiling) and may add
-// pre-token protocols below the watchlist floor: the early rows the radar exists to find. A protocol is
-// pre-token when its index entry records no token (no market cap, no CoinGecko id, no symbol); the
-// snapshot's live-token protocols are kept apart and shown as the market's own values, never mixed into
-// the ranked board.
+// The idea is one sentence long. A protocol's implied value is its TVL times a multiple:
 //
-// Implied value follows only from the snapshot's own figures:
+//   implied = tvl_usd x 10 ** (category level + intercept + size slope x (log10 tvl_usd - mean log10 tvl_usd))
 //
-//   base       = tvl_usd x BASE_MULTIPLE
-//   growth     = clamp(change_7d, -60, 120) per cent
-//   growthMult = 1 + (growth / 100) x GROWTH_WEIGHT
-//   maturity   = 0.6 + min(age_days, 1095) / 1095 x 0.4   (age_days unknown: 365)
-//   implied    = max(1, round(base x growthMult x maturity))
+// The multiple is not typed in by hand anywhere in this file. It is fitted, on every run, from the protocols in
+// this same snapshot that already trade a token: a market cap above zero and a TVL above zero. There are 128 of
+// them here. For each peer the model measures the multiple its market actually pays, y = log10(mcap_usd /
+// tvl_usd), and where that peer sits in size, x = log10(tvl_usd); it also carries two fields it will refuse to
+// price, g = clamp(change_7d, -60, 120) / 100 and a = log10(age_days), so the ablation can say out loud what they
+// would have cost.
 //
-// The constants are the house model's, stated in the dashboard and changeable in the model sandbox. No
-// protocol name is ever special-cased: the same function scores every row.
+// Each category's level is the mean of its peers' y, shrunk toward the mean of every peer's y with a prior of four
+// observations: w = n / (n + 4), so a category one peer deep keeps four fifths of the global level and a
+// category forty peers deep is almost its own mean. On top of that level the fit estimates one intercept and one
+// slope per requested feature, by least squares on the normal equations (Gauss-Jordan elimination with partial
+// pivoting, zeros when the system is singular), features centred on their means first. The shipped model asks
+// for one feature, x, so its multiple is:
+//
+//   multiple = 10 ** (category level + intercept + slope x (log10 tvl_usd - the peers' mean log10 tvl_usd))
+//
+// The intercept is what the category levels leave over on average (near zero, and the fit reports it); the slope
+// is the size effect the peers themselves show, roughly -0.4: a protocol tenfold larger in TVL pays only about
+// 0.42 of the multiple a tenfold-smaller one gets, so big pools are not priced at small-pool multiples, but the
+// effect is gentle. On this snapshot the slope is -0.376 with t = -4.3.
+// The band on each row is the same log multiple plus or minus 1.2816 (the 80 per cent two-sided normal quantile)
+// times that category's own spread of y about its level, or the global spread where a category has fewer than
+// three peers to measure one. The band is wide on purpose. It is the fit's honest statement of how little a
+// category tells you about one protocol.
+//
+// How much of this to believe. Every number the fit reports is leave-one-out: the peer being priced is removed
+// from the data, the model refitted on the rest, and the peer's own y compared with what came back. That is the only
+// honest test here, and on this snapshot it says the model is close to a level and far from a ranking. The median
+// predicted/actual ratio is 0.98, i.e. near 1.0, so the centre is calibrated; but the mean absolute
+// error is 0.70 dex and only about three peers in ten land within 2x of their own fitted value, so
+// roughly three in four peers still miss by more than 2x. Category helps essentially not at all on its own (0.772
+// against 0.773 for one global mean: about a thousandth of a dex, which fixes level bias, not discrimination); the
+// size slope is the one term that earns its place (0.697, an improvement of 0.074 dex, more than ten times the
+// 0.005-dex threshold this file holds itself to); the seven-day change and the listing age each make the error
+// worse and are displayed, not priced. So: the model levels a category, and it cannot rank a single protocol. The
+// board's order is a level times a size adjustment, with a band that says how wide the category's spread is, and
+// that is all it is. Spread inside a category swamps the difference between two rows in it.
+//
+// The board's selection is unchanged from the earlier pages: every slug in the snapshot's watchlist, plus the
+// pre-token protocols below the watchlist floor that pass isRankable, by TVL, capped at EARLY_ROWS. A protocol is
+// pre-token when its index entry records no token at all (no market cap, no CoinGecko id, no symbol). The
+// snapshot's live-token protocols are kept apart and shown as the market's own values, never mixed into the board.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -40,111 +71,28 @@ export interface Snapshot {
   watchlist: string[];
 }
 
-/** The model's constants, as the dashboard states them and the sandbox may change them. */
-export interface ModelConstants {
-  base_multiple: number;
-  growth_weight: number;
+/** The model's settings: the prior that shrinks a category, the band width, and the numeric context. */
+export interface ModelSettings {
+  prior_k: number;
+  band_z: number;
+  min_improvement_dex: number;
+  unknown_age_days: number;
   growth_floor: number;
   growth_cap: number;
-  maturity_floor: number;
-  maturity_range: number;
-  maturity_days: number;
-  unknown_age_days: number;
 }
 
-export const MODEL: ModelConstants = {
-  base_multiple: 0.25,
-  growth_weight: 0.5,
+export type ModelConstants = ModelSettings;
+
+export const MODEL: ModelSettings = {
+  prior_k: 4,
+  band_z: 1.2816,
+  min_improvement_dex: 0.005,
+  unknown_age_days: 365,
   growth_floor: -60,
   growth_cap: 120,
-  maturity_floor: 0.6,
-  maturity_range: 0.4,
-  maturity_days: 1095,
-  unknown_age_days: 365,
 };
 
-/**
- * Airdrop coefficients per category - these are the multipliers used by airdropFactor.
- * Categories that historically farm tokens more often get higher coefficients.
- * Bridges, restaking, L2 chains, DEXs, lending, and launchpads are prioritized.
- * CEX and wrapper categories are deprioritized as they rarely drop tokens.
- *
- * The spread is deliberate: the radar's whole claim is that a live-dollar TVL in a
- * token-farming category does not imply the same value as one in a dead-end category.
- * These coefficients widen the gap so the ranked order is driven by the category and
- * the protocol's own growth, not silently by raw TVL alone.
- */
-export const AIRDROP_COEFFICIENTS: Record<string, number> = {
-  'bridge': 1.60,
-  'canonical bridge': 1.60,
-  'cross chain bridge': 1.55,
-  'liquid restaking': 1.70,
-  'restaking': 1.70,
-  'restaked btc': 1.60,
-  'decentralized btc': 1.50,
-  'chain': 1.50,
-  'dexs': 1.45,
-  'dex': 1.45,
-  'lending': 1.45,
-  'cdp': 1.45,
-  'cdp manager': 1.45,
-  'liquid staking': 1.40,
-  'staking pool': 1.40,
-  'prediction market': 1.55,
-  'launchpad': 1.80,
-  'yield': 1.30,
-  'yield aggregator': 1.25,
-  'ai agents': 1.45,
-  'decentralized ai': 1.45,
-  'basis trading': 1.25,
-  'derivatives': 1.25,
-  'governance incentives': 1.30,
-  'token locker': 1.20,
-  'indexes': 1.20,
-  'curator': 1.20,
-  'risk curators': 1.20,
-  'onchain capital allocator': 1.20,
-  'privacy': 1.20,
-  'options': 1.20,
-  'options vault': 1.20,
-  'algo-stables': 0.85,
-  'stablecoin issuer': 0.70,
-  'stablecoin wrapper': 0.65,
-  'dual-token stablecoin': 0.70,
-  'payments': 0.80,
-  'insurance': 0.80,
-  'cex': 0.60,
-};
-
-/**
- * A protocol's category, mapped to how likely it is to farm a token soon. This is the radar's edge:
- * two protocols with the same TVL and growth do not imply the same value, because some categories
- * (bridges, restaking, L2s, DEXs, lending) drop tokens far more often than others (CEX, wrappers,
- * oracles). The map is by category word, not by name, so the same rule scores every row. Every
- * category not listed scores 1 — the neutral case.
- */
-const CATEGORY_FACTOR: Record<string, number> = AIRDROP_COEFFICIENTS;
-
-/** The airdrop factor of a protocol's category, or 1 when unknown or no category: the neutral case. */
-export function airdropFactor(category: string | null): number {
-  if (category === null) return 1;
-  const c = category.toLowerCase();
-  if (CATEGORY_FACTOR[c] !== undefined) return CATEGORY_FACTOR[c];
-  // Fall back on the strongest word that appears in a composite category name.
-  const words = ['bridge', 'restak', 'staking', 'dex', 'lend', 'yield', 'cdp', 'vault', 'curator', 'launchpad', 'index', 'ai'];
-  for (const w of words) {
-    if (c.includes(w)) {
-      for (const key of Object.keys(CATEGORY_FACTOR)) {
-        if (key.includes(w) && CATEGORY_FACTOR[key] !== undefined) return CATEGORY_FACTOR[key] as number;
-      }
-    }
-  }
-  return 1;
-}
-
-/** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-2-airdrop';
-
+export const MODEL_VERSION = 'radar-3-comps-fit';
 
 /** How many pre-token protocols below the watchlist floor the early radar carries, by TVL. */
 export const EARLY_ROWS = 160;
@@ -152,14 +100,57 @@ export const EARLY_ROWS = 160;
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
 
-/** A farm step: the action, what it costs, and how long it takes. */
-export interface FarmStep {
-  text: string;
-  cost: string;
-  time: string;
+const DAY_MS = 86_400_000;
+const MATURITY_DAYS = 1095;
+
+/** One category's line in the fit: what its own live-token peers pay, and the band the board carries. */
+export interface FitCategory {
+  category: string;
+  n: number;
+  geom_multiple: number;
+  shrunk_multiple: number;
+  loo_sd: number;
+  low: number;
+  high: number;
 }
 
-/** One row of board.json: the ranked board's row. */
+/** One row of the ablation table: what a specification's leave-one-out error was, and whether it shipped. */
+export interface AblationRow {
+  name: string;
+  mae_dex: number;
+  delta_dex: number;
+  priced: boolean;
+  note?: string;
+}
+
+/** The fit: the comparables' own multiples, the calibration it earns, and the ablation that chose it. */
+export interface Fit {
+  n_live: number;
+  n_categories: number;
+  global_multiple: number;
+  size_slope: number;
+  size_t: number;
+  mae_dex: number;
+  p50_ratio: number;
+  baseline_p50_ratio: number;
+  within2: number;
+  within3: number;
+  within5: number;
+  gate_dex: number;
+  prior_k: number;
+  band_z: number;
+  categories: FitCategory[];
+  ablation: AblationRow[];
+  log_global: number;
+  intercept: number;
+  mean_log_tvl: number;
+  sd_global: number;
+  log_by_category: Record<string, number>;
+  sd_by_category: Record<string, number>;
+  peer_counts: Record<string, number>;
+}
+
+/** One row of board.json: the ranked board's row, with the fitted multiple it was priced at. */
 export interface BoardRow {
   rank: number;
   slug: string;
@@ -175,12 +166,18 @@ export interface BoardRow {
   token_status: 'pre-token';
   age_days: number | null;
   implied_value_usd: number;
+  low_value_usd: number;
+  high_value_usd: number;
   model: {
-    base_multiple: number;
+    multiple: number;
+    category_multiple: number;
+    size_multiple: number;
+    category_n: number;
+    band_low: number;
+    band_high: number;
     growth_pct: number;
     growth_multiplier: number;
     maturity_multiplier: number;
-    airdrop_multiplier: number;
     age_days: number | null;
   };
   farm_steps: string[];
@@ -199,9 +196,12 @@ export interface RadarRow {
   listed_at: string | null;
   age_days: number | null;
   implied_value_usd: number;
+  low_value_usd: number;
+  high_value_usd: number;
+  multiple: number;
+  category_n: number;
   growth_multiplier: number;
   maturity_multiplier: number;
-  airdrop_multiplier: number;
 }
 
 /** A live-token protocol: it already trades, so the board shows the market's own value, not a model's. */
@@ -215,12 +215,12 @@ export interface LiveRow {
   change_7d: number | null;
 }
 
-/** Everything the dashboard needs: the board, the live set, and the model it runs. */
+/** Everything the dashboard needs: the board, the live set, the fit behind it and the settings it ran. */
 export interface RadarData {
   as_of: string;
   source: string;
   floor_usd: number;
-  model: ModelConstants;
+  model: ModelSettings;
   model_version: string;
   watchlist_size: number;
   board_size: number;
@@ -228,6 +228,7 @@ export interface RadarData {
   live_size: number;
   rows: RadarRow[];
   live: LiveRow[];
+  fit: Fit;
 }
 
 /** Why the snapshot is not one this model can score. */
@@ -238,12 +239,43 @@ export class SnapshotError extends Error {
   }
 }
 
-const DAY_MS = 86_400_000;
-
 /** A finite number, else `fallback`. */
 function finite(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
+
+/** `value` kept inside [lo, hi]. */
+function clamp(value: number, lo: number, hi: number): number {
+  return value < lo ? lo : value > hi ? hi : value;
+}
+
+/** The arithmetic mean of `values`, or 0 when it is empty. */
+function mean(values: number[]): number {
+  if (values.length === 0) return 0;
+  let sum = 0;
+  for (const v of values) sum += v;
+  return sum / values.length;
+}
+
+/** The median of `values` (the mean of the middle pair when even), or 0 when it is empty. */
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[mid]!;
+  return (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+/** The sample standard deviation (n - 1), or 0 when fewer than two values are given. */
+function sampleSd(values: number[]): number {
+  if (values.length < 2) return 0;
+  const m = mean(values);
+  let ss = 0;
+  for (const v of values) ss += (v - m) * (v - m);
+  return Math.sqrt(ss / (values.length - 1));
+}
+
+const round4 = (n: number): number => Math.round(n * 1e4) / 1e4;
 
 /** A whole day count from `from` to `to`, clamped at zero; null when either date is absent or bad. */
 export function ageDays(asOf: string, listedAt: string | null): number | null {
@@ -254,18 +286,305 @@ export function ageDays(asOf: string, listedAt: string | null): number | null {
   return Math.max(0, Math.floor((a - b) / DAY_MS));
 }
 
-/** The three multipliers and the implied value one protocol gets under `model`. */
-export function impliedValue(protocol: SnapshotProtocol, asOf: string, model: ModelConstants): { implied: number; growthPct: number; growthMult: number; maturityMult: number; airdropMult: number; age: number | null } {
-  const age = ageDays(asOf, protocol.listed_at);
-  const rawGrowth = finite(protocol.change_7d, 0);
-  const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, rawGrowth));
-  const growthMult = 1 + (growthPct / 100) * model.growth_weight;
-  const ageForModel = age ?? model.unknown_age_days;
-  const maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
-  const airdropMult = airdropFactor(protocol.category);
-  const base = protocol.tvl_usd * model.base_multiple;
-  const implied = Math.max(1, Math.round(base * growthMult * maturityMult * airdropMult));
-  return { implied, growthPct, growthMult, maturityMult, airdropMult, age };
+/** A protocol's category as a key: trimmed and lowercased; null or empty is 'uncategorised'. */
+export function categoryKey(category: string | null): string {
+  const c = (category ?? '').trim().toLowerCase();
+  return c === '' ? 'uncategorised' : c;
+}
+
+/** Display labels for every key, in the snapshot's own spelling (first seen); 'Uncategorised' is the fallback. */
+function displayLabels(protocols: SnapshotProtocol[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const p of protocols) {
+    const raw = p.category;
+    if (typeof raw !== 'string' || raw.trim() === '') continue;
+    const key = categoryKey(raw);
+    if (!map.has(key)) map.set(key, raw.trim());
+  }
+  return map;
+}
+
+/** A live-token peer lifted into the log-space shape the fit works in. */
+export interface Peer {
+  slug: string;
+  key: string;
+  y: number;
+  x: number;
+  g: number;
+  a: number;
+}
+
+/** The fit's comparables: protocols with both a market cap and a TVL above zero, in log space. */
+export function peersOf(snapshot: Snapshot, settings: ModelSettings): Peer[] {
+  const peers: Peer[] = [];
+  for (const p of snapshot.protocols) {
+    if (!(typeof p.mcap_usd === 'number' && p.mcap_usd > 0 && p.tvl_usd > 0)) continue;
+    const age = ageDays(snapshot.as_of, p.listed_at) ?? settings.unknown_age_days;
+    peers.push({
+      slug: p.slug,
+      key: categoryKey(p.category),
+      y: Math.log10(p.mcap_usd / p.tvl_usd),
+      x: Math.log10(p.tvl_usd),
+      g: clamp(finite(p.change_7d, 0), settings.growth_floor, settings.growth_cap) / 100,
+      a: Math.log10(Math.max(age, 1)),
+    });
+  }
+  return peers;
+}
+
+/** The seven-day change clamped into the settings' band, in per cent: context shown, never priced. */
+function growthPct(change: number | null, settings: ModelSettings): number {
+  return clamp(finite(change, 0), settings.growth_floor, settings.growth_cap);
+}
+
+/** The row's display multiples. Both are CONTEXT: shown next to the row, never multiplied into implied. */
+function contextMultipliers(change: number | null, age: number | null, settings: ModelSettings) {
+  const pc = growthPct(change, settings);
+  const days = Math.min(Math.max(age ?? settings.unknown_age_days, 0), MATURITY_DAYS);
+  return {
+    growth_pct: pc,
+    growth_multiplier: 1 + pc / 100,
+    maturity_multiplier: 0.6 + (days / MATURITY_DAYS) * 0.4,
+  };
+}
+
+/** Gauss-Jordan elimination with partial pivoting on [a | b]; zeros when a pivot is singular. */
+function solveNormal(a: number[][], b: number[]): number[] {
+  const m = b.length;
+  const rows: number[][] = a.map((row, i) => [...row, b[i]!]);
+  for (let col = 0; col < m; col++) {
+    let piv = col;
+    for (let r = col + 1; r < m; r++) {
+      if (Math.abs(rows[r]![col]!) > Math.abs(rows[piv]![col]!)) piv = r;
+    }
+    const lead = rows[piv]![col]!;
+    if (!(Math.abs(lead) > 1e-12)) return new Array(m).fill(0);
+    if (piv !== col) {
+      const t = rows[piv]!;
+      rows[piv] = rows[col]!;
+      rows[col] = t;
+    }
+    for (let c = col; c <= m; c++) rows[col]![c] = rows[col]![c]! / lead;
+    for (let r = 0; r < m; r++) {
+      if (r === col) continue;
+      const f = rows[r]![col]!;
+      if (f === 0) continue;
+      for (let c = col; c <= m; c++) rows[r]![c] = rows[r]![c]! - f * rows[col]![c]!;
+    }
+  }
+  const out = rows.map((r) => r[m]!);
+  for (const v of out) if (!Number.isFinite(v)) return new Array(m).fill(0);
+  return out;
+}
+
+/** Least squares of `target` on the columns of `design`, by the normal equations; zeros if singular. */
+function ols(design: number[][], target: number[]): number[] {
+  const cols = design.length > 0 ? design[0]!.length : 0;
+  if (cols === 0 || design.length < cols) return new Array(cols).fill(0);
+  const ata: number[][] = [];
+  const atb: number[] = [];
+  for (let i = 0; i < cols; i++) {
+    const row: number[] = [];
+    for (let j = 0; j < cols; j++) {
+      let s = 0;
+      for (let k = 0; k < design.length; k++) s += design[k]![i]! * design[k]![j]!;
+      row.push(s);
+    }
+    ata.push(row);
+    let s = 0;
+    for (let k = 0; k < design.length; k++) s += design[k]![i]! * target[k]!;
+    atb.push(s);
+  }
+  return solveNormal(ata, atb);
+}
+
+/** The value of one named feature of a peer ('x' log TVL, 'g' clamped growth over 100, 'a' log age). */
+function featureOf(p: Peer, f: string): number {
+  return f === 'x' ? p.x : f === 'g' ? p.g : p.a;
+}
+
+/** One refit: the shrunk category levels, the fitted intercept and slopes, and the spreads the bands need. */
+export interface Estimate {
+  feats: string[];
+  coef: number[];
+  centers: number[];
+  catLog: Record<string, number>;
+  globalLog: number;
+  meanX: number;
+  sdCat: Record<string, number>;
+  sdGlobal: number;
+  n: number;
+}
+
+/**
+ * Refit the model on `peers` with the category prior `k`, leaving peer index `drop` out when it is at least
+ * zero. The two terms are, in order: the shrunk category level, then an intercept plus one slope per requested
+ * feature, fitted to what the category levels miss.
+ */
+export function refit(peers: Peer[], k: number, drop: number, feats: string[]): Estimate {
+  const keep = peers.filter((_, i) => drop < 0 || i !== drop);
+  const globalLog = mean(keep.map((p) => p.y));
+  const meanX = mean(keep.map((p) => p.x));
+  const byKey = new Map<string, number[]>();
+  for (const p of keep) {
+    const list = byKey.get(p.key);
+    if (list === undefined) byKey.set(p.key, [p.y]);
+    else list.push(p.y);
+  }
+  const catLog: Record<string, number> = {};
+  for (const [key, list] of byKey) {
+    const w = list.length / (list.length + k);
+    catLog[key] = w * mean(list) + (1 - w) * globalLog;
+  }
+  const resid = keep.map((p) => p.y - (catLog[p.key] ?? globalLog));
+  const centers = feats.map((f) => mean(keep.map((p) => featureOf(p, f))));
+  const design = keep.map((p) => [1, ...feats.map((f, j) => featureOf(p, f) - centers[j]!)]);
+  const coef = ols(design, resid);
+  const sdCat: Record<string, number> = {};
+  for (const [key, list] of byKey) {
+    if (list.length < 3) continue;
+    sdCat[key] = sampleSd(list.map((y) => y - catLog[key]!));
+  }
+  return { feats, coef, centers, catLog, globalLog, meanX, sdCat, sdGlobal: sampleSd(resid), n: keep.length };
+}
+
+/** A peer's fitted log multiple: its category level, the intercept, and each feature's shift from the mean. */
+export function predict(est: Estimate, p: Peer): number {
+  let v = (est.catLog[p.key] ?? est.globalLog) + (est.coef[0] ?? 0);
+  for (let j = 0; j < est.feats.length; j++) {
+    v += (est.coef[j + 1] ?? 0) * (featureOf(p, est.feats[j]!) - (est.centers[j] ?? 0));
+  }
+  return v;
+}
+
+/** The spread the board's band uses for a category: its own peers' spread, else the global spread. */
+export function spreadFor(fit: Fit, key: string, logM: number): number {
+  const own = fit.sd_by_category[key];
+  if (own !== undefined) return own;
+  const base = fit.log_by_category[key] ?? fit.log_global;
+  return Math.max(fit.sd_global, Math.abs(logM - base));
+}
+
+/**
+ * Fit the comparable-multiple model on the snapshot's own live-token peers. `full` is every peer; then each peer
+ * is priced by a model refitted without it, five ways, so the calibration and the ablation are leave-one-out and
+ * no peer helps price itself.
+ */
+export function fitModel(snapshot: Snapshot, settings: ModelSettings = MODEL): Fit {
+  const peers = peersOf(snapshot, settings);
+  const k = settings.prior_k;
+  const full = refit(peers, k, -1, ['x']);
+  const errsShip: number[] = [];
+  const errsGlobal: number[] = [];
+  const errsCat: number[] = [];
+  const errsMom: number[] = [];
+  const errsAge: number[] = [];
+  for (let i = 0; i < peers.length; i++) {
+    const p = peers[i]!;
+    errsShip.push(p.y - predict(refit(peers, k, i, ['x']), p));
+    errsGlobal.push(p.y - refit(peers, k, i, []).globalLog);
+    errsCat.push(p.y - predict(refit(peers, k, i, []), p));
+    errsMom.push(p.y - predict(refit(peers, k, i, ['x', 'g']), p));
+    errsAge.push(p.y - predict(refit(peers, k, i, ['x', 'a']), p));
+  }
+  return finishFit(snapshot, settings, peers, full, [errsShip, errsGlobal, errsCat, errsMom, errsAge]);
+}
+
+/** Turn the five leave-one-out error vectors into the calibration, the ablation table and the category table. */
+function finishFit(snapshot: Snapshot, settings: ModelSettings, peers: Peer[], full: Estimate, errs: number[][]): Fit {
+  const errsShip = errs[0]!;
+  const errsGlobal = errs[1]!;
+  const errsCat = errs[2]!;
+  const errsMom = errs[3]!;
+  const errsAge = errs[4]!;
+  const mae = (e: number[]): number => mean(e.map((v) => Math.abs(v)));
+  const share = (e: number[], d: number): number => (e.length === 0 ? 0 : e.filter((v) => Math.abs(v) <= d).length / e.length);
+  const n = peers.length;
+
+  let sq = 0;
+  for (const p of peers) sq += (p.y - predict(full, p)) * (p.y - predict(full, p));
+  let sxx = 0;
+  for (const p of peers) sxx += (p.x - full.meanX) * (p.x - full.meanX);
+  const sizeSlope = full.coef[1] ?? 0;
+  const se = n > 2 && sxx > 0 ? Math.sqrt(sq / (n - 2) / sxx) : 0;
+  const sizeT = se > 0 ? sizeSlope / se : 0;
+
+  const labels = displayLabels(snapshot.protocols);
+  const counts = new Map<string, number>();
+  const sums = new Map<string, number>();
+  for (const p of peers) {
+    counts.set(p.key, (counts.get(p.key) ?? 0) + 1);
+    sums.set(p.key, (sums.get(p.key) ?? 0) + p.y);
+  }
+  const keys = new Set<string>(Object.keys(full.catLog));
+  for (const p of snapshot.protocols) keys.add(categoryKey(p.category));
+  const categories: FitCategory[] = [...keys].map((key) => {
+    const cn = counts.get(key) ?? 0;
+    const log = cn > 0 ? full.catLog[key]! : full.globalLog;
+    const own = full.sdCat[key];
+    const spread = cn >= 3 && own !== undefined ? own : Math.max(full.sdGlobal, own ?? 0);
+    return {
+      category: labels.get(key) ?? 'Uncategorised',
+      n: cn,
+      geom_multiple: cn > 0 ? 10 ** (sums.get(key)! / cn) : 0,
+      shrunk_multiple: 10 ** log,
+      loo_sd: spread,
+      low: 10 ** (log - settings.band_z * spread),
+      high: 10 ** (log + settings.band_z * spread),
+    };
+  });
+  categories.sort((a, b) => b.n - a.n || b.shrunk_multiple - a.shrunk_multiple || (a.category < b.category ? -1 : a.category > b.category ? 1 : 0));
+  return {
+    n_live: n,
+    n_categories: categories.length,
+    global_multiple: 10 ** full.globalLog,
+    size_slope: sizeSlope,
+    size_t: sizeT,
+    mae_dex: mae(errsShip),
+    p50_ratio: median(errsShip.map((e) => 10 ** e)),
+    baseline_p50_ratio: median(errsGlobal.map((e) => 10 ** e)),
+    within2: share(errsShip, Math.log10(2)),
+    within3: share(errsShip, Math.log10(3)),
+    within5: share(errsShip, Math.log10(5)),
+    gate_dex: settings.min_improvement_dex,
+    prior_k: settings.prior_k,
+    band_z: settings.band_z,
+    categories,
+    ablation: ablationRows(settings, mae, errsShip, errsGlobal, errsCat, errsMom, errsAge),
+    log_global: full.globalLog,
+    intercept: full.coef[0] ?? 0,
+    mean_log_tvl: full.meanX,
+    sd_global: full.sdGlobal,
+    log_by_category: full.catLog,
+    sd_by_category: full.sdCat,
+    peer_counts: Object.fromEntries(counts),
+  };
+}
+
+/**
+ * The ablation table: one row per specification, in the order the terms entered. `delta_dex` is that row's MAE
+ * minus the basis row's MAE, where the basis is the last specification that shipped: so each rejected feature is
+ * measured against the model that was actually kept, and a positive delta means the feature made the error worse.
+ */
+function ablationRows(settings: ModelSettings, mae: (e: number[]) => number, ship: number[], global: number[], cat: number[], mom: number[], age: number[]): AblationRow[] {
+  const table: Array<[string, number, boolean, string | undefined]> = [
+    ['Global mean, one multiple for all', mae(global), false, undefined],
+    [`Category level, shrunk k=${settings.prior_k}`, mae(cat), true, 'level bias, not discrimination'],
+    ['+ TVL size slope', mae(ship), true, undefined],
+    ['+ 7-day momentum', mae(mom), false, undefined],
+    ['+ age since listing', mae(age), false, undefined],
+  ];
+  const rows: AblationRow[] = [];
+  let pricedBase = table[0]![1];
+  for (let i = 0; i < table.length; i++) {
+    const [name, m, priced, note] = table[i]!;
+    const delta = i === 0 ? 0 : m - pricedBase;
+    const row: AblationRow = { name, mae_dex: m, delta_dex: delta, priced };
+    if (note !== undefined) row.note = note;
+    rows.push(row);
+    if (priced) pricedBase = m;
+  }
+  return rows;
 }
 
 /** DefiLlama's version-marker rule: a name ending in a release is a pool of another protocol. */
@@ -294,8 +613,14 @@ export interface BoardSummary {
   live_size: number;
 }
 
-/** The protocols the board ranks, strongest first, with ranks 1..n. */
-export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): BoardRow[] {
+/**
+ * The protocols the board ranks, strongest first, with ranks 1..n, each priced at the multiple its category's
+ * live-token peers pay (shrunk, shifted by the TVL size slope) and given that category's band. The board is a
+ * level per category, not a ranking inside one: two rows in a category differ only by the size slope and by
+ * where they sit between their band's ends.
+ */
+export function buildBoard(snapshot: Snapshot, model: ModelSettings = MODEL, fitted?: Fit): BoardRow[] {
+  const fit = fitted ?? fitModel(snapshot, model);
   const index = bySlug(snapshot.protocols);
   const chosen = new Map<string, SnapshotProtocol>();
   // The watchlist is the floor: every slug, even one the snapshot no longer carries (it cannot, but the
@@ -313,38 +638,52 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
   for (const p of early) chosen.set(p.slug, p);
 
   const scored = [...chosen.values()].map((p) => {
-    const { implied, growthPct, growthMult, maturityMult, airdropMult, age } = impliedValue(p, snapshot.as_of, model);
-    return { p, implied, growthPct, growthMult, maturityMult, airdropMult, age };
+    const age = ageDays(snapshot.as_of, p.listed_at);
+    const key = categoryKey(p.category);
+    const base = fit.log_by_category[key] ?? fit.log_global;
+    const logM = base + fit.intercept + fit.size_slope * (Math.log10(p.tvl_usd) - fit.mean_log_tvl);
+    const spread = spreadFor(fit, key, logM);
+    const implied = Math.max(1, Math.round(p.tvl_usd * 10 ** logM));
+    const low = Math.max(1, Math.round(p.tvl_usd * 10 ** (logM - model.band_z * spread)));
+    const high = Math.max(implied, Math.round(p.tvl_usd * 10 ** (logM + model.band_z * spread)));
+    return { p, age, key, logM, base, spread, implied, low, high };
   });
   scored.sort((a, b) => b.implied - a.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
-  return scored.map((s, i) => ({
-    rank: i + 1,
-    slug: s.p.slug,
-    name: s.p.name,
-    category: s.p.category,
-    chains: s.p.chains,
-    tvl_usd: s.p.tvl_usd,
-    change_7d: s.p.change_7d,
-    mcap_usd: s.p.mcap_usd,
-    listed_at: s.p.listed_at,
-    gecko_id: s.p.gecko_id,
-    symbol: s.p.symbol,
-    token_status: 'pre-token',
-    age_days: s.age,
-    implied_value_usd: s.implied,
-    model: {
-      base_multiple: model.base_multiple,
-      growth_pct: s.growthPct,
-      growth_multiplier: round4(s.growthMult),
-      maturity_multiplier: round4(s.maturityMult),
-      airdrop_multiplier: round4(s.airdropMult),
+  return scored.map((s, i) => {
+    const ctx = contextMultipliers(s.p.change_7d, s.age, model);
+    return {
+      rank: i + 1,
+      slug: s.p.slug,
+      name: s.p.name,
+      category: s.p.category,
+      chains: s.p.chains,
+      tvl_usd: s.p.tvl_usd,
+      change_7d: s.p.change_7d,
+      mcap_usd: s.p.mcap_usd,
+      listed_at: s.p.listed_at,
+      gecko_id: s.p.gecko_id,
+      symbol: s.p.symbol,
+      token_status: 'pre-token',
       age_days: s.age,
-    },
-    farm_steps: farmSteps(s.p, s.age).map(stepText),
-  }));
+      implied_value_usd: s.implied,
+      low_value_usd: s.low,
+      high_value_usd: s.high,
+      model: {
+        multiple: round4(10 ** s.logM),
+        category_multiple: round4(10 ** s.base),
+        size_multiple: round4(10 ** (s.logM - s.base)),
+        category_n: fit.peer_counts[s.key] ?? 0,
+        band_low: round4(10 ** (s.logM - model.band_z * s.spread)),
+        band_high: round4(10 ** (s.logM + model.band_z * s.spread)),
+        growth_pct: round4(ctx.growth_pct),
+        growth_multiplier: round4(ctx.growth_multiplier),
+        maturity_multiplier: round4(ctx.maturity_multiplier),
+        age_days: s.age,
+      },
+      farm_steps: farmSteps(s.p, s.age).map(stepText),
+    };
+  });
 }
-
-const round4 = (n: number): number => Math.round(n * 1e4) / 1e4;
 
 /** A step as one string: its action, then its cost and time, within the gate's 20..600 characters. */
 export function stepText(step: FarmStep): string {
@@ -373,6 +712,13 @@ function holdDaysFor(age: number | null): number {
   if (age < 180) return 60;
   if (age < 365) return 45;
   return 30;
+}
+
+/** A farm step: the action, what it costs, and how long it takes. */
+export interface FarmStep {
+  text: string;
+  cost: string;
+  time: string;
 }
 
 /** The category's one action, in the words a farmer can follow. */
@@ -466,15 +812,19 @@ export function radarRow(row: BoardRow): RadarRow {
     listed_at: row.listed_at,
     age_days: row.age_days,
     implied_value_usd: row.implied_value_usd,
+    low_value_usd: row.low_value_usd,
+    high_value_usd: row.high_value_usd,
+    multiple: row.model.multiple,
+    category_n: row.model.category_n,
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
-    airdrop_multiplier: row.model.airdrop_multiplier,
   };
 }
 
-/** Everything the dashboard renders, from the snapshot. */
+/** Everything the dashboard renders, from the snapshot and the fit it was scored with. */
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
-  const board = buildBoard(snapshot, model);
+  const fit = fitModel(snapshot, model);
+  const board = buildBoard(snapshot, model, fit);
   const live = liveRows(snapshot);
   const early = board.filter((r) => !snapshot.watchlist.includes(r.slug)).length;
   const radar: RadarData = {
@@ -489,6 +839,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     live_size: live.length,
     rows: board.map(radarRow),
     live,
+    fit,
   };
   return { board, radar };
 }
