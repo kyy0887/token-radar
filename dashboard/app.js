@@ -91,6 +91,8 @@
     category: '',
     chain: '',
     tvlBand: '',
+    scope: '',
+    ageBand: '',
     sortKey: 'implied',
     sortDir: 'desc',
     depositIdx: 1,
@@ -99,6 +101,11 @@
   };
 
   var DEPOSITS = [1000, 5000, 25000];
+
+  function ageLabel(band) {
+    var map = { '0-365': 'under 1 yr', '365-1095': '1\u20133 yrs', '1095-99999': 'over 3 yrs' };
+    return map[band] || band;
+  }
 
   /** One deposit scenario re-derived at the current farmer share, from the build's own scenario row. */
   function farmAt(row, idx) {
@@ -269,8 +276,18 @@
     return tvl >= lo && tvl < hi;
   }
 
+  function ageMatch(days) {
+    if (!state.ageBand) return true;
+    var parts = state.ageBand.split('-');
+    var d = Number(days);
+    return d >= Number(parts[0]) && d < Number(parts[1]);
+  }
+
   function rowMatches(row) {
     if (state.verdict && farmAt(row, state.depositIdx).verdict !== state.verdict) return false;
+    if (state.scope === 'watch' && !row.watchlist) return false;
+    if (state.scope === 'early' && row.watchlist) return false;
+    if (!ageMatch(row.age_days)) return false;
     if (state.category && row.category !== state.category) return false;
     if (state.chain && (row.chains || []).indexOf(state.chain) < 0) return false;
     if (!tvlMatch(row.tvl_usd)) return false;
@@ -325,7 +342,7 @@
 
     var matched = radar.rows.filter(rowMatches);
     view = sortView(matched);
-    state.filtered = !!(state.verdict || state.category || state.chain || state.tvlBand || state.query.trim());
+    state.filtered = !!(state.verdict || state.category || state.chain || state.tvlBand || state.scope || state.ageBand || state.query.trim());
     hideEmpty();
 
     if (view.length === 0) {
@@ -386,6 +403,8 @@
     if (state.category) parts.push(state.category);
     if (state.chain) parts.push(state.chain);
     if (state.tvlBand) parts.push('TVL band ' + state.tvlBand);
+    if (state.scope) parts.push(state.scope === 'watch' ? 'watchlist only' : 'early stage only');
+    if (state.ageBand) parts.push('age ' + ageLabel(state.ageBand));
     if (state.query.trim()) parts.push('\u201c' + state.query.trim() + '\u201d');
     parts.push((radar.counts.watchlist_on_board || 0) + '/' + radar.watchlist_size + ' watchlist covered');
     n.textContent = parts.join(' \u00b7 ');
@@ -410,14 +429,18 @@
   function renderSegment(shown, implied) {
     var seg = document.getElementById('segment');
     if (!seg) return;
-    if (!state.verdict && !state.category && !state.chain && !state.tvlBand) {
+    if (!state.verdict && !state.category && !state.chain && !state.tvlBand && !state.scope && !state.ageBand) {
       seg.hidden = true;
       seg.textContent = '';
       return;
     }
     seg.hidden = false;
     seg.textContent = '';
-    seg.appendChild(el('span', { class: 'seg-chip', text: 'FILTERED: ' + (state.verdict || 'all verdicts') }));
+    var active = [];
+    if (state.verdict) active.push(state.verdict);
+    if (state.scope) active.push(state.scope === 'watch' ? 'watchlist' : 'early stage');
+    if (state.ageBand) active.push('age ' + ageLabel(state.ageBand));
+    seg.appendChild(el('span', { class: 'seg-chip', text: 'FILTERED: ' + (active.length ? active.join(' + ') : 'all verdicts') }));
     seg.appendChild(el('span', { class: 'seg-item' }, el('b', { text: String(shown) }), ' matching protocols'));
     seg.appendChild(el('span', { class: 'seg-item' }, el('b', { text: usd(implied) }), ' aggregate implied value'));
     seg.appendChild(el('span', { class: 'seg-item' }, el('b', { text: money(DEPOSITS[state.depositIdx]) }), ' deposit'));
@@ -821,6 +844,12 @@
     var band = document.getElementById('tvl-band');
     if (band) band.addEventListener('change', function () { state.tvlBand = band.value; renderBoard(); });
 
+    var scope = document.getElementById('scope');
+    if (scope) scope.addEventListener('change', function () { state.scope = scope.value; renderBoard(); });
+
+    var ageSel = document.getElementById('age-band');
+    if (ageSel) ageSel.addEventListener('change', function () { state.ageBand = ageSel.value; renderBoard(); });
+
     var sort = document.getElementById('sort');
     if (sort) sort.addEventListener('change', function () {
       state.sortKey = sort.value;
@@ -841,12 +870,14 @@
       state.category = '';
       state.chain = '';
       state.tvlBand = '';
+      state.scope = '';
+      state.ageBand = '';
       state.sortKey = 'implied';
       state.sortDir = 'desc';
       state.depositIdx = 1;
       state.share = K.farmer_share;
       if (q) q.value = '';
-      ['category', 'chain', 'verdict', 'tvl-band'].forEach(function (id) {
+      ['category', 'chain', 'verdict', 'tvl-band', 'scope', 'age-band'].forEach(function (id) {
         var s = document.getElementById(id);
         if (s) s.value = '';
       });
