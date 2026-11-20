@@ -658,7 +658,8 @@ details summary::-webkit-details-marker { display: none; }
 .farm-table tr:last-child td { border-bottom: 0; }
 .farm-n { color: var(--amber); font-weight: 600; width: 20px; }
 .farm-step { color: var(--text); }
-.farm-cost, .farm-time { color: var(--text-weak); white-space: nowrap; }
+.farm-cost { color: var(--text-weak); white-space: nowrap; }
+.farm-time { color: var(--text-weak); }
 
 /* ---------- print ---------- */
 
