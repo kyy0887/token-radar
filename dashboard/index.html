@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar - pre-token launch desk</title>
-<meta name="description" content="A pre-token launch desk: 200 protocols that record no token, ranked by an implied value computed from TVL, seven-day growth and age, each with a farm plan.">
-<link rel="stylesheet" href="app.css">
+<title>Launch Radar &mdash; pre-token protocol intelligence</title>
+<meta name="description" content="A pre-token launch desk: every protocol in the snapshot classified, priced for the token it has not issued, scored for the odds it does, and costed for whether farming it pays.">
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <a class="skip" href="#board">Skip to the board</a>
@@ -16,43 +16,59 @@
     <div class="brand">
       <span class="mark" aria-hidden="true"></span>
       <div class="brand-text">
-        <span class="brand-name">Token Radar</span>
-        <span class="brand-sub">Pre-token launch desk</span>
+        <span class="brand-name">Launch Radar</span>
+        <span class="brand-sub">Pre-token protocol intelligence</span>
       </div>
     </div>
     <dl class="telemetry" aria-label="Snapshot telemetry">
       <div class="chip"><dt>Snapshot</dt><dd id="t-asof">&mdash;</dd></div>
-      <div class="chip"><dt>Floor</dt><dd id="t-floor">&mdash;</dd></div>
+      <div class="chip"><dt>Protocols</dt><dd id="t-protos">&mdash;</dd></div>
+      <div class="chip"><dt>Watchlist</dt><dd id="t-watch">&mdash;</dd></div>
       <div class="chip"><dt>Model</dt><dd id="t-model">&mdash;</dd></div>
-      <div class="chip chip-status"><dt>Status</dt><dd><span class="dot" aria-hidden="true"></span>local data</dd></div>
+      <div class="chip chip-status"><dt>Status</dt><dd><span class="dot" aria-hidden="true"></span>local, deterministic</dd></div>
     </dl>
   </header>
 
-  <section class="coverage" aria-label="Snapshot coverage">
-    <ul class="coverage-list" id="coverage">
-      <li class="cov cov-ok"><span class="cov-check" aria-hidden="true">&#10003;</span> Watchlist <b id="cov-watch">&mdash;</b> covered</li>
-      <li class="cov"><b id="cov-ranked">&mdash;</b> ranked</li>
-      <li class="cov"><b id="cov-early">&mdash;</b> below floor</li>
-      <li class="cov"><b id="cov-live">&mdash;</b> live-token set aside</li>
-    </ul>
+  <section class="kpis" aria-label="Headline figures">
+    <div class="kpi">
+      <span class="kpi-label">Pre-token protocols</span>
+      <span class="kpi-value" id="kpi-count">&mdash;</span>
+      <span class="kpi-note" id="kpi-count-note">&mdash;</span>
+    </div>
+    <div class="kpi">
+      <span class="kpi-label">Aggregate implied value</span>
+      <span class="kpi-value" id="kpi-implied">&mdash;</span>
+      <span class="kpi-note" id="kpi-implied-note">&mdash;</span>
+    </div>
+    <div class="kpi">
+      <span class="kpi-label">Out-of-sample error</span>
+      <span class="kpi-value kpi-value-sm" id="kpi-mae">&mdash;</span>
+      <span class="kpi-note" id="kpi-mae-note">&mdash;</span>
+    </div>
+    <div class="kpi">
+      <span class="kpi-label">80% band coverage</span>
+      <span class="kpi-value kpi-value-sm" id="kpi-cover">&mdash;</span>
+      <span class="kpi-note" id="kpi-cover-note">&mdash;</span>
+    </div>
+    <div class="kpi">
+      <span class="kpi-label">Launch odds validation</span>
+      <span class="kpi-value kpi-value-sm" id="kpi-odds">&mdash;</span>
+      <span class="kpi-note" id="kpi-odds-note">&mdash;</span>
+    </div>
+    <div class="kpi">
+      <span class="kpi-label">FARM opportunities</span>
+      <span class="kpi-value" id="kpi-farm">&mdash;</span>
+      <span class="kpi-note" id="kpi-farm-note">&mdash;</span>
+    </div>
   </section>
 
-  <section class="kpis" aria-label="Board key figures">
-    <div class="kpi">
-      <span class="kpi-label">Median implied value</span>
-      <span class="kpi-value" id="kpi-median">&mdash;</span>
-      <span class="kpi-note" id="kpi-median-note">&mdash;</span>
+  <section class="accounting" aria-label="Protocol accounting">
+    <div class="acc-head">
+      <h2 class="acc-title">Protocol accounting</h2>
+      <span class="acc-total" id="acc-total">&mdash;</span>
     </div>
-    <div class="kpi">
-      <span class="kpi-label">Total TVL ranked</span>
-      <span class="kpi-value" id="kpi-tvl">&mdash;</span>
-      <span class="kpi-note" id="kpi-tvl-note">&mdash;</span>
-    </div>
-    <div class="kpi">
-      <span class="kpi-label">Top category by implied value</span>
-      <span class="kpi-value kpi-value-sm" id="kpi-cat">&mdash;</span>
-      <span class="kpi-note" id="kpi-cat-note">&mdash;</span>
-    </div>
+    <div class="acc-bar" id="acc-bar" role="img" aria-label="Classification of every protocol in the snapshot"></div>
+    <ul class="acc-legend" id="acc-legend"></ul>
   </section>
 
   <section class="console" aria-label="Board controls">
@@ -62,16 +78,53 @@
         <input id="q" type="search" placeholder="name, category or chain" aria-label="Search protocols by name, category or chain">
       </div>
       <div class="field">
+        <label class="field-label" for="verdict">Farm verdict</label>
+        <select id="verdict" aria-label="Filter by farm verdict">
+          <option value="">All verdicts</option>
+          <option value="FARM">FARM only</option>
+          <option value="MARGINAL">MARGINAL only</option>
+          <option value="SKIP">SKIP only</option>
+        </select>
+      </div>
+      <div class="field">
         <label class="field-label" for="category">Category</label>
         <select id="category" aria-label="Filter by category">
           <option value="">All categories</option>
         </select>
       </div>
       <div class="field">
-        <span class="field-label" id="tab-label">Token status</span>
-        <div class="tabs" role="group" aria-labelledby="tab-label">
-          <button type="button" id="tab-pre" class="tab is-active" aria-pressed="true">Pre-token</button>
-          <button type="button" id="tab-live" class="tab" aria-pressed="false">Trades now</button>
+        <label class="field-label" for="chain">Chain</label>
+        <select id="chain" aria-label="Filter by chain">
+          <option value="">All chains</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label" for="tvl-band">TVL</label>
+        <select id="tvl-band" aria-label="Filter by TVL band">
+          <option value="">Any TVL</option>
+          <option value="0-50">Under $50M</option>
+          <option value="50-250">$50M &ndash; $250M</option>
+          <option value="250-1000">$250M &ndash; $1B</option>
+          <option value="1000-99999">Over $1B</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label" for="sort">Sort</label>
+        <select id="sort" aria-label="Sort the board">
+          <option value="implied">Implied value</option>
+          <option value="odds">Launch odds</option>
+          <option value="net">Net after fees</option>
+          <option value="hour">Net per hour</option>
+          <option value="tvl">TVL</option>
+          <option value="age">Age without token</option>
+        </select>
+      </div>
+      <div class="field">
+        <span class="field-label" id="dep-label">Deposit scenario</span>
+        <div class="tabs" role="group" aria-labelledby="dep-label" id="dep-tabs">
+          <button type="button" class="tab" data-dep="0" aria-pressed="false">$1K</button>
+          <button type="button" class="tab is-active" data-dep="1" aria-pressed="true">$5K</button>
+          <button type="button" class="tab" data-dep="2" aria-pressed="false">$25K</button>
         </div>
       </div>
       <div class="field field-reset">
@@ -80,34 +133,80 @@
       </div>
     </form>
     <p class="count" id="count" role="status" aria-live="polite"></p>
+    <div class="segment" id="segment" hidden></div>
   </section>
 
-  <section class="panel" id="board-panel" aria-label="Pre-token board">
-    <table id="board-table">
-      <caption>Pre-token protocols, strongest implied value first. Click a column to sort it; open a row for its model breakdown and farm plan.</caption>
-      <thead>
-        <tr>
-          <th scope="col" class="num sortable" data-key="rank" aria-sort="descending">Rank</th>
-          <th scope="col" class="sortable" data-key="name">Protocol</th>
-          <th scope="col" class="num sortable" data-key="tvl">TVL</th>
-          <th scope="col" class="num sortable" data-key="change">7D</th>
-          <th scope="col" class="num sortable" data-key="age">Age</th>
-          <th scope="col" class="num sortable is-sorted" data-key="implied" aria-sort="descending">Implied value</th>
-          <th scope="col">Token</th>
-        </tr>
-      </thead>
-      <tbody id="board-body"></tbody>
-    </table>
-    <div class="empty" id="empty" hidden>
-      <h2>Nothing matches that filter</h2>
-      <p>The board is only narrowed, never replaced &mdash; clear the filters to see every row.</p>
-      <button type="button" class="ghost" id="empty-reset">Clear filters</button>
-    </div>
-    <div class="empty" id="no-data" hidden>
-      <h2>No snapshot loaded</h2>
-      <p>The page renders from a local data file that sets window.RADAR. It is empty or missing, so there is nothing honest to show.</p>
-    </div>
-  </section>
+  <div class="work">
+    <section class="panel" id="board-panel" aria-label="Pre-token board">
+      <table id="board-table">
+        <caption>Pre-token protocols, strongest implied value first. Click a column to sort it; open a row for its model decomposition and farm plan.</caption>
+        <thead>
+          <tr>
+            <th scope="col" class="num sortable" data-key="rank" aria-sort="descending">Rank</th>
+            <th scope="col" class="sortable" data-key="name">Protocol</th>
+            <th scope="col" class="num sortable" data-key="tvl">TVL</th>
+            <th scope="col" class="num sortable" data-key="change">7D</th>
+            <th scope="col" class="num sortable" data-key="age">No token</th>
+            <th scope="col" class="num sortable" data-key="odds">Odds</th>
+            <th scope="col" class="num sortable" data-key="fdv">If launched</th>
+            <th scope="col" class="num sortable is-sorted" data-key="implied" aria-sort="descending">Implied</th>
+            <th scope="col" class="num">P25&ndash;P75</th>
+            <th scope="col" class="sortable" data-key="verdict">Verdict</th>
+            <th scope="col" class="num sortable" data-key="net">Net</th>
+            <th scope="col" class="num sortable" data-key="hour">Net/hr</th>
+          </tr>
+        </thead>
+        <tbody id="board-body"></tbody>
+      </table>
+      <div class="empty" id="empty" hidden>
+        <h2>Nothing matches that filter</h2>
+        <p>The board is only narrowed, never replaced &mdash; clear the filters to see every row.</p>
+        <button type="button" class="ghost" id="empty-reset">Clear filters</button>
+      </div>
+      <div class="empty" id="no-data" hidden>
+        <h2>No snapshot loaded</h2>
+        <p>The page renders from a local data file that sets window.RADAR. It is empty or missing, so there is nothing honest to show.</p>
+      </div>
+    </section>
+
+    <aside class="research" aria-label="Model validation">
+      <h2 class="res-title">Model validation</h2>
+      <p class="res-sub" id="res-sub">&mdash;</p>
+
+      <div class="res-block">
+        <h3 class="res-h">Out-of-sample error</h3>
+        <table class="mini-table" id="ablation-table">
+          <thead>
+            <tr><th>Specification</th><th class="num">MAE</th><th class="num">&Delta;</th></tr>
+          </thead>
+          <tbody id="ablation-body"></tbody>
+        </table>
+        <p class="res-foot" id="res-ablation-foot"></p>
+      </div>
+
+      <div class="res-block">
+        <h3 class="res-h">Band coverage</h3>
+        <table class="mini-table" id="cover-table">
+          <thead><tr><th>Interval</th><th class="num">Held-out inside</th><th class="num">Nominal</th></tr></thead>
+          <tbody id="cover-body"></tbody>
+        </table>
+      </div>
+
+      <div class="res-block">
+        <h3 class="res-h">Launch odds calibration</h3>
+        <table class="mini-table" id="calib-table">
+          <thead><tr><th>Predicted</th><th class="num">Observed</th><th class="num">n</th></tr></thead>
+          <tbody id="calib-body"></tbody>
+        </table>
+        <p class="res-foot" id="res-calib-foot"></p>
+      </div>
+
+      <div class="res-block">
+        <h3 class="res-h">What the fit refuses</h3>
+        <ul class="res-list" id="res-list"></ul>
+      </div>
+    </aside>
+  </div>
 
   <section class="panel" id="live-panel" aria-label="Protocols whose token already trades" hidden>
     <p class="live-note">Token already trades: the market sets its value, not this model. These rows are never ranked against the pre-token board.</p>
@@ -120,7 +219,6 @@
           <th scope="col" class="num">TVL</th>
           <th scope="col" class="num">Market cap</th>
           <th scope="col" class="num">7D</th>
-          <th scope="col">Token</th>
         </tr>
       </thead>
       <tbody id="live-body"></tbody>
@@ -129,23 +227,18 @@
 
   <section class="model-panel">
     <details id="how">
-      <summary>How implied value is computed</summary>
+      <summary>How valued-den value, launch odds and the farm verdict are computed</summary>
       <div class="how-body">
-        <p class="formula" id="formula">implied = round(TVL &times; multiple(category) &times; size(TVL))</p>
-        <p class="how-copy">Both factors are refitted on every run, from this snapshot&rsquo;s own live-token protocols: a token that already trades tells the desk what the market pays per dollar of TVL in its category and at its size. No coefficient is typed in by hand and no protocol name is special-cased. Growth and age are printed on each row as context &mdash; the ablation refused them, so they do not move the estimate.</p>
+        <p class="formula" id="formula">implied = TVL &times; multiple(category, TVL) &times; P(token within 12 months)</p>
+        <p class="how-copy">Both factors are refitted on every run from this snapshot&rsquo;s own records, so no coefficient is typed in by hand and no protocol name is special-cased.</p>
         <ul class="mult-list">
-          <li><span class="mult-chip">&times;category</span> That category&rsquo;s geometric mean of mcap&nbsp;/&nbsp;TVL, shrunk toward the whole market by <b id="f-k">4</b> pseudo-observations. A category with one or two peers keeps most of the global level: one comparable is not evidence.</li>
-          <li><span class="mult-chip">&times;size</span> A fitted log&ndash;log slope on TVL of <b id="f-slope">&mdash;</b> per decade (t&nbsp;=&nbsp;<b id="f-t">&mdash;</b>): the bigger book pays the lower multiple, so TVL alone decides nothing. It takes the error from <b id="f-mae-cat">&mdash;</b> to <b id="f-mae-ship">&mdash;</b> dex.</li>
-          <li><span class="mult-chip">&plusmn;band</span> Each row carries an 80% band, <b id="f-z">&mdash;</b> &times; its own category&rsquo;s leave-one-out spread. The band is the honest unit; the point is a centre.</li>
+          <li><span class="mult-chip">&times;category</span> That category&rsquo;s geometric mean of market cap&nbsp;/&nbsp;TVL across live-token peers, shrunk toward the whole market by <b id="f-k">4</b> pseudo-observations. A category with one or two peers keeps most of the global level: one comparable is not evidence.</li>
+          <li><span class="mult-chip">&times;size</span> A fitted log&ndash;log slope on TVL of <b id="f-slope">&mdash;</b> per decade (t&nbsp;=&nbsp;<b id="f-t">&mdash;</b>): the bigger book pays the lower multiple. It takes leave-one-out error from <b id="f-mae-cat">&mdash;</b> to <b id="f-mae-ship">&mdash;</b> dex.</li>
+          <li><span class="mult-chip">&times;odds</span> A logistic fit on the snapshot&rsquo;s own labels &mdash; does this protocol record a token? &mdash; using TVL and years without one, plus a per-category offset. Out-of-fold AUC <b id="f-auc">&mdash;</b>, Brier <b id="f-brier">&mdash;</b> against <b id="f-brier-base">&mdash;</b> for the base rate. Odds are reported over a 12-month horizon at <b id="f-horizon">&mdash;</b> of the fitted eventual odds.</li>
+          <li><span class="mult-chip">&plusmn;band</span> Each row carries an 80% band, <b id="f-z">&mdash;</b> &times; its own category&rsquo;s leave-one-out spread, scaled by the same odds. The band is the honest unit; the point is a centre.</li>
+          <li><span class="mult-chip">farm</span> Expected allocation = FDV &times; farmer share <b id="f-share">&mdash;</b> &times; deposit&nbsp;/&nbsp;campaign TVL, where campaign TVL is <b id="f-elig">&mdash;</b> of protocol TVL plus the deposit. Gross = odds &times; allocation &mdash; the odds are applied once, here, and never again. Net subtracts fixed gas <b id="f-fixed">&mdash;</b> and the T-bill interest foregone over <b id="f-months">&mdash;</b> months.</li>
         </ul>
         <p class="how-foot" id="how-foot"></p>
-        <p class="detail-sec-label">What the fit kept, and what it refused &mdash; leave-one-out over every live-token peer</p>
-        <table class="farm-table" id="ablation-table">
-          <thead>
-            <tr><th>Specification</th><th class="num">MAE, dex</th><th class="num">Change</th><th>Shipped</th></tr>
-          </thead>
-          <tbody id="ablation-body"></tbody>
-        </table>
         <p class="detail-sec-label">The multiples it derived, by category</p>
         <table class="farm-table" id="cat-table">
           <thead>
@@ -159,7 +252,7 @@
   </section>
 
   <footer class="foot">
-    <p><b>Implied value is this desk's own claim.</b> It is what a protocol's record might be worth if a token were issued against it &mdash; not whether one is issued, and not when. Every figure comes from the sealed snapshot on this page; nothing is fetched.</p>
+    <p><b>Implied value is this desk&rsquo;s own claim.</b> It is what a protocol&rsquo;s book might be worth if a token were issued against it and the odds above were the odds &mdash; not whether one is issued, and not when. Farming figures are estimates on stated assumptions, not income.</p>
     <p class="foot-meta"><span id="t-source">DefiLlama protocol index</span> &middot; <span id="t-floor2">&mdash;</span> floor &middot; <span id="t-model2">&mdash;</span></p>
   </footer>
 
@@ -169,7 +262,7 @@
 <dialog class="detail" id="detail" aria-labelledby="detail-name">
   <div class="detail-inner">
     <div class="detail-bar">
-      <span class="detail-file">Protocol file</span>
+      <span class="detail-file">Protocol dossier</span>
       <div class="detail-nav">
         <button type="button" class="ghost" id="detail-prev" aria-label="Previous protocol in this sort">&lsaquo; Prev</button>
         <button type="button" class="ghost" id="detail-next" aria-label="Next protocol in this sort">Next &rsaquo;</button>

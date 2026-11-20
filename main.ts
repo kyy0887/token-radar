@@ -16,7 +16,8 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { boardIssue, buildRadar, dataScript, parseSnapshot } from './lib/model.ts';
+import { parseSnapshot } from './lib/model.ts';
+import { boardIssue8, buildRadar8, dataScript8 } from './lib/radar8.ts';
 import { buildDossier } from './vendor/makefun-board.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -44,8 +45,12 @@ if (!existsSync(inputFile)) {
 const out = arg('output', process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
 
 const snapshot = parseSnapshot(readFileSync(inputFile, 'utf8'));
-const { board, radar } = buildRadar(snapshot);
-const issue = boardIssue(board, snapshot);
+const { board, radar } = buildRadar8(snapshot);
+const issue = boardIssue8(board);
+if (!radar.counts.watchlist_on_board || radar.counts.watchlist_on_board < radar.watchlist_size) {
+  process.stderr.write(`token radar: the board covers ${radar.counts.watchlist_on_board} of ${radar.watchlist_size} watchlist slugs\n`);
+  process.exit(1);
+}
 if (issue !== null) {
   process.stderr.write(`token radar: the model wrote a board the gate refuses: ${issue}\n`);
   process.exit(1);
@@ -53,7 +58,7 @@ if (issue !== null) {
 
 mkdirSync(out, { recursive: true });
 writeFileSync(join(out, 'board.json'), `${JSON.stringify({ rows: board })}\n`);
-writeFileSync(join(out, 'data.js'), dataScript(radar));
+writeFileSync(join(out, 'data.js'), dataScript8(radar));
 
 /** Copy one directory's regular files into `to`, skipping names that start with a dot. */
 function copyFiles(from: string, to: string): string[] {
